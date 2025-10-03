@@ -153,3 +153,5 @@ func (c Client) DeleteVideo(id uuid.UUID) error {
 	_, err := c.db.Exec(query, id)
 	return err
 }
+
+

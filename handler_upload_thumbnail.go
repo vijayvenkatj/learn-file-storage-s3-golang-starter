@@ -1,8 +1,14 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
+	"io"
+	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
@@ -33,5 +39,67 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 
 	// TODO: implement the upload here
 
-	respondWithJSON(w, http.StatusOK, struct{}{})
+	maxMemory := 10 << 20;
+
+	err = r.ParseMultipartForm(int64(maxMemory))
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't parse MultiPart Form", err)
+		return
+	}
+
+	thumbnailFile, fileHeader , err := r.FormFile("thumbnail")
+	ext := filepath.Ext(fileHeader.Filename)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't get Thumbnail file", err)
+		return
+	}
+
+	mimeType := fileHeader.Header.Get("Content-Type");
+	mediaType, _, err := mime.ParseMediaType(mimeType)
+	if mediaType != "image/jpeg" && mediaType != "image/png" {
+		fmt.Print(mediaType)
+		respondWithError(w, http.StatusForbidden, "Invalid file format",err)
+		return
+	}
+
+
+	videoDetails, err := cfg.db.GetVideo(videoID)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error getting video details", err)
+		return
+	}
+
+	if videoDetails.UserID != userID {
+		respondWithError(w, http.StatusUnauthorized, "Un-Authorised", err)
+		return
+	}
+
+	randomData := make([]byte,32)
+	rand.Read(randomData)
+
+	thumbnailFileName := filepath.Join(cfg.assetsRoot,fmt.Sprintf("%s%s",base64.RawStdEncoding.EncodeToString(randomData),ext))
+
+	osFile, err := os.Create(thumbnailFileName)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error writing file", err)
+		return
+	}
+
+	thumbnailUrl := fmt.Sprintf("http://localhost:8091/%s",thumbnailFileName)
+	videoDetails.ThumbnailURL = &thumbnailUrl
+	
+	fmt.Print(thumbnailUrl)
+
+	io.Copy(osFile,thumbnailFile)
+
+
+
+	err = cfg.db.UpdateVideo(videoDetails)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error updating thumbnail", err)
+		return
+	}
+
+
+	respondWithJSON(w, http.StatusOK, videoDetails)
 }

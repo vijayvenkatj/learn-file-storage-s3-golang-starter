@@ -3,9 +3,12 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
+	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/helpers"
 	"github.com/google/uuid"
 )
 
@@ -95,7 +98,13 @@ func (cfg *apiConfig) handlerVideoGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondWithJSON(w, http.StatusOK, video)
+	signedVideo, err := cfg.dbVideoToSignedVideo(video)
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, "Couldn't get video", err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, signedVideo)
 }
 
 func (cfg *apiConfig) handlerVideosRetrieve(w http.ResponseWriter, r *http.Request) {
@@ -116,5 +125,34 @@ func (cfg *apiConfig) handlerVideosRetrieve(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	for i, video := range videos {
+		videoWithPresignedUrl, err := cfg.dbVideoToSignedVideo(video)
+		if err != nil {
+			respondWithError(w, http.StatusNotFound, "Couldn't get video", err)
+			return
+		}
+		videos[i] = videoWithPresignedUrl
+	}
+
 	respondWithJSON(w, http.StatusOK, videos)
+}
+
+
+func (cfg *apiConfig) dbVideoToSignedVideo(video database.Video) (database.Video, error) {
+
+	videoUrl := video.VideoURL;
+
+	videoDetails := strings.Split(*videoUrl, ",")
+
+	bucket, key := videoDetails[0], videoDetails[1]
+
+	presignedurl, err := helpers.GeneratePresignedURL(cfg.s3Client,bucket,key,time.Hour * 24)
+	if err != nil {
+		return video, err
+	}
+	video.VideoURL = &presignedurl
+
+
+
+	return video, nil
 }
